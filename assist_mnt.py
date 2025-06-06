@@ -110,6 +110,16 @@ class AssistMnt(QObject):
             parent=self.iface.mainWindow()
         )
 
+        # **Ajouter ce code pour le bouton toggle**
+        # Bouton toggle pour le mode de tracé libre
+        icon_path = os.path.join(icon_dir, "icon_toggle.png")  # Assurez-vous que l'icône existe
+        icon = QIcon(icon_path)
+        self.action_toggle_free_draw = QAction(icon, self.tr(u'Tracé Libre'), self.iface.mainWindow())
+        self.action_toggle_free_draw.setCheckable(True)
+        self.action_toggle_free_draw.toggled.connect(self.toggle_free_draw)
+        self.toolbar.addAction(self.action_toggle_free_draw)
+        self.actions.append(self.action_toggle_free_draw)
+
         # Bouton pour StopMNT
         self.action_stopMNT = self.add_action(
             os.path.join(icon_dir, "icon_stop.png"),
@@ -118,6 +128,8 @@ class AssistMnt(QObject):
             parent=self.iface.mainWindow()
         )
 
+
+
     def unload(self):
         """
         Supprime la barre d'outils du plugin et ses boutons de l'interface QGIS.
@@ -125,6 +137,15 @@ class AssistMnt(QObject):
         for action in self.actions:
             self.toolbar.removeAction(action)
         del self.toolbar
+
+    def toggle_free_draw(self, checked):
+        """Bascule entre le mode assisté et le mode de tracé libre."""
+        if self.ridge_tool is not None:
+            self.ridge_tool.set_free_draw_mode(checked)
+        else:
+            QMessageBox.warning(None, "Avertissement", "Veuillez d'abord activer l'outil avec le bouton StartMNT.")
+            # Désactiver le bouton si l'outil n'est pas actif
+            self.action_toggle_free_draw.setChecked(False)
 
     def mntvisu_callback(self):
         """Function for MNTvisu button."""
@@ -261,9 +282,16 @@ class AssistMnt(QObject):
 
     def stopmnt_callback(self):
         """Désactivation de l'outil et exportation du shapefile."""
+        """Désactivation de l'outil et exportation du shapefile."""
         if self.ridge_tool is None:
             QMessageBox.warning(None, "Avertissement", "Aucun tracé en cours.")
             return
+        # **Si en mode tracé libre, quitter ce mode pour enregistrer les points**
+        if self.ridge_tool.free_draw_mode:
+            self.ridge_tool.set_free_draw_mode(False)
+            self.action_toggle_free_draw.setChecked(False)
+
+
 
         # Exporter la polyligne finale dans un fichier .shp
         output_path = os.path.join(self.plugin_dir, "ligne_cretes.shp")
@@ -320,6 +348,8 @@ class RidgeDrawingTool(QgsMapTool):
         self.start_point = None
         self.dynamic_path = None
         self.confirmed_polylines = []
+        self.free_draw_mode = False  # **Ajouter cette ligne**
+        self.free_draw_points = []  # **Ajouter cette ligne**
 
         # Rubber band pour la ligne dynamique
         self.dynamic_rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
@@ -332,36 +362,90 @@ class RidgeDrawingTool(QgsMapTool):
         self.confirmed_rubber_band.setColor(QColor(0, 0, 255))
         self.confirmed_rubber_band.setWidth(2)
 
+        # **Ajouter ce code pour le tracé libre**
+        # Rubber band pour le tracé libre
+        self.free_draw_rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
+        self.free_draw_rubber_band.setColor(QColor(0, 255, 0))
+        self.free_draw_rubber_band.setWidth(2)
+
+    def set_free_draw_mode(self, free_draw):
+        """Bascule le mode de tracé libre."""
+        if free_draw:
+            # Entrer en mode tracé libre
+            self.free_draw_mode = True
+            self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
+
+            # Initialiser les points du tracé libre avec le dernier point
+            if self.start_point is not None:
+                self.free_draw_points = [self.start_point]
+                self.free_draw_rubber_band.reset(QgsWkbTypes.LineGeometry)
+                self.free_draw_rubber_band.addPoint(self.start_point)
+            else:
+                # Aucun point de départ défini
+                self.free_draw_points = []
+        else:
+            # Sortir du mode tracé libre
+            self.free_draw_mode = False
+            self.free_draw_rubber_band.reset(QgsWkbTypes.LineGeometry)
+            if len(self.free_draw_points) >= 2:
+                # Créer une polyligne à partir des points tracés librement
+                free_draw_line = QgsGeometry.fromPolylineXY(self.free_draw_points)
+                # Ajouter aux polylignes confirmées
+                self.confirmed_polylines.append(free_draw_line)
+                self.confirmed_rubber_band.addGeometry(free_draw_line, None)
+                # Mettre à jour le point de départ pour le prochain segment
+                self.start_point = self.free_draw_points[-1]
+            elif len(self.free_draw_points) == 1:
+                # Un seul point cliqué en mode libre
+                self.start_point = self.free_draw_points[0]
+            # Réinitialiser les points du tracé libre
+            self.free_draw_points = []
+
     def canvasPressEvent(self, event):
         """Gestion des clics de souris."""
         map_point = self.toMapCoordinates(event.pos())
 
-        if self.start_point is None:
-            # Premier clic : définir le point de départ
-            self.start_point = map_point
+        if self.free_draw_mode:
+            # Mode tracé libre
+            self.free_draw_points.append(map_point)
+            self.free_draw_rubber_band.addPoint(map_point)
         else:
-            # Clic suivant : confirmer le tronçon actuel
-            if self.dynamic_path:
-                # Ajouter la polyligne confirmée
-                self.confirmed_polylines.append(self.dynamic_path)
-                self.confirmed_rubber_band.addGeometry(self.dynamic_path, None)
-            # Mettre à jour le point de départ
-            self.start_point = QgsPointXY(self.dynamic_path.asPolyline()[-1])
-            # Réinitialiser la ligne dynamique
-            self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
+            if self.start_point is None:
+                # Premier clic : définir le point de départ
+                self.start_point = map_point
+            else:
+                # Clic suivant : confirmer le segment actuel
+                if self.dynamic_path:
+                    # Ajouter la polyligne confirmée
+                    self.confirmed_polylines.append(self.dynamic_path)
+                    self.confirmed_rubber_band.addGeometry(self.dynamic_path, None)
+                    # Mettre à jour le point de départ pour le prochain segment
+                    self.start_point = self.dynamic_path.asPolyline()[-1]
+                # Réinitialiser la ligne dynamique
+                self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
 
     def canvasMoveEvent(self, event):
-        """Gestion du mouvement de la souris pour dessiner la ligne dynamique."""
-        if self.start_point is not None:
+        """Gestion des mouvements de souris."""
+        if self.free_draw_mode:
             current_point = self.toMapCoordinates(event.pos())
-            # Calculer le chemin de plus haute altitude
-            path_geometry = self.calculate_highest_path(self.start_point, current_point)
-            if path_geometry:
-                self.dynamic_path = path_geometry
-                self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
-                self.dynamic_rubber_band.addGeometry(path_geometry, None)
-            else:
-                self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
+            if self.free_draw_points:
+                # Mettre à jour le rubber band pour montrer la ligne du dernier point jusqu'au curseur
+                self.free_draw_rubber_band.reset(QgsWkbTypes.LineGeometry)
+                for point in self.free_draw_points:
+                    self.free_draw_rubber_band.addPoint(point)
+                self.free_draw_rubber_band.addPoint(current_point)
+        else:
+            # Comportement existant
+            if self.start_point is not None:
+                current_point = self.toMapCoordinates(event.pos())
+                # Calculer le chemin de plus haute altitude
+                path_geometry = self.calculate_highest_path(self.start_point, current_point)
+                if path_geometry:
+                    self.dynamic_path = path_geometry
+                    self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
+                    self.dynamic_rubber_band.addGeometry(path_geometry, None)
+                else:
+                    self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
 
     def calculate_highest_path(self, start_point, end_point):
         """Calcul du chemin de plus haute altitude entre deux points dans le buffer."""
@@ -370,7 +454,7 @@ class RidgeDrawingTool(QgsMapTool):
 
         # Création du buffer autour de la ligne entre les deux points
         line = QgsGeometry.fromPolylineXY([start_point, end_point])
-        buffer_distance = 10  # 10 mètres de chaque côté
+        buffer_distance = 15  # 10 mètres de chaque côté
         buffer_geom = line.buffer(buffer_distance, -1)
 
         # Définir l'étendue du raster à extraire
@@ -501,4 +585,7 @@ class RidgeDrawingTool(QgsMapTool):
         self.confirmed_polylines = []
         self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
         self.confirmed_rubber_band.reset(QgsWkbTypes.LineGeometry)
-
+        # **Réinitialiser le tracé libre**
+        self.free_draw_rubber_band.reset(QgsWkbTypes.LineGeometry)
+        self.free_draw_points = []
+        self.free_draw_mode = False
