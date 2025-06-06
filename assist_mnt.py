@@ -3,14 +3,19 @@ assist_mnt.py
 """
 
 import os
-import processing
-import numpy as np
-import networkx as nx
 
+import matplotlib
+import networkx as nx
+import numpy as np
+import processing
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QObject, QVariant
 from qgis.PyQt.QtGui import QIcon, QColor
+from qgis.PyQt.QtWidgets import QAction, QMenu, QToolButton
 from qgis.PyQt.QtWidgets import QAction, QMessageBox
-from qgis._core import QgsVectorFileWriter
+from qgis.PyQt.QtWidgets import QAction, QMessageBox, QComboBox, QWidget, QToolBar
+from qgis.PyQt.QtWidgets import QAction, QMessageBox, QComboBox, QWidgetAction
+from qgis.PyQt.QtWidgets import QDockWidget, QWidget, QVBoxLayout
+from qgis._core import QgsRaster
 from qgis.core import (
     QgsProject,
     QgsRasterLayer,
@@ -18,20 +23,19 @@ from qgis.core import (
     QgsRasterTransparency,
     QgsMapLayer,
     QgsProcessingFeedback,
-    QgsField,
-    QgsFields,
     QgsFeature,
     QgsGeometry,
     QgsPointXY,
     QgsVectorLayer,
     QgsWkbTypes,
-    QgsRectangle,
-    QgsRasterDataProvider,
-    QgsCoordinateTransform,
-    QgsCoordinateTransformContext
+    QgsCoordinateTransform
 )
 from qgis.gui import QgsMapTool, QgsRubberBand
-from osgeo import gdal
+
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from qgis.PyQt.QtWidgets import QAction, QMessageBox, QMenu, QToolButton, QInputDialog
 
 class AssistMnt(QObject):
     """
@@ -54,6 +58,7 @@ class AssistMnt(QObject):
         self.toolbar = self.iface.addToolBar('Assist MNT')
         self.toolbar.setObjectName('Assist MNT')
         self.ridge_tool = None  # Instance du nouvel outil
+        self.profile_dock = None  # Ajoutez cette ligne
 
     def tr(self, message):
         """
@@ -66,7 +71,7 @@ class AssistMnt(QObject):
         """
         return QCoreApplication.translate('AssistMnt', message)
 
-    def add_action(self, icon_path, text, callback, parent=None):
+    def add_action(self, icon_path, text, callback, enabled_flag=True, add_to_menu=True, add_to_toolbar=True, status_tip=None, whats_this=None, parent=None):
         """
         Ajouter une action à la barre d'outils personnalisée Assist MNT.
 
@@ -84,51 +89,59 @@ class AssistMnt(QObject):
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
-        self.toolbar.addAction(action)
         self.actions.append(action)
+
+        if add_to_toolbar:
+            self.toolbar.addAction(action)
+
         return action
+
+    from qgis.PyQt.QtWidgets import QAction, QMenu, QToolButton
 
     def initGui(self):
         """
-        Crée les boutons de la barre d'outils dans l'interface QGIS.
+        Configure la barre d'outils avec les boutons initiaux.
         """
         icon_dir = self.plugin_dir
 
-        # Bouton pour MNTvisu
-        self.add_action(
-            os.path.join(icon_dir, "icon_2dm.png"),
-            text=self.tr(u'MNTvisu'),
-            callback=self.mntvisu_callback,
-            parent=self.iface.mainWindow()
-        )
+        # Créer la barre d'outils
+        self.toolbar = self.iface.addToolBar('Assist MNT')
+        self.toolbar.setObjectName('Assist MNT')
 
-        # Bouton pour StartMNT
-        self.action_startMNT = self.add_action(
-            os.path.join(icon_dir, "icon_start.png"),
-            text=self.tr(u'StartMNT'),
-            callback=self.startmnt_callback,
-            parent=self.iface.mainWindow()
-        )
+        # Créer le bouton MNTvisu et l'ajouter à la barre d'outils
+        self.action_mntvisu = QAction(QIcon(os.path.join(icon_dir, "icon_2dm.png")), self.tr(u'MNTvisu'),
+                                      self.iface.mainWindow())
+        self.action_mntvisu.triggered.connect(self.mntvisu_callback)
+        self.toolbar.addAction(self.action_mntvisu)
 
-        # **Ajouter ce code pour le bouton toggle**
-        # Bouton toggle pour le mode de tracé libre
-        icon_path = os.path.join(icon_dir, "icon_toggle.png")  # Assurez-vous que l'icône existe
-        icon = QIcon(icon_path)
-        self.action_toggle_free_draw = QAction(icon, self.tr(u'Tracé Libre'), self.iface.mainWindow())
-        self.action_toggle_free_draw.setCheckable(True)
-        self.action_toggle_free_draw.toggled.connect(self.toggle_free_draw)
-        self.toolbar.addAction(self.action_toggle_free_draw)
-        self.actions.append(self.action_toggle_free_draw)
+        # Créer le QMenu
+        self.menu = QMenu()
+        self.menu.setTitle("Configuration MNT")
 
-        # Bouton pour StopMNT
-        self.action_stopMNT = self.add_action(
-            os.path.join(icon_dir, "icon_stop.png"),
-            text=self.tr(u'StopMNT'),
-            callback=self.stopmnt_callback,
-            parent=self.iface.mainWindow()
-        )
+        # Ajouter les actions au menu
+        self.action_tracer_seuils = QAction("Tracé de seuils", self.iface.mainWindow())
+        self.action_tracer_seuils.triggered.connect(self.show_threshold_tools)
+        self.menu.addAction(self.action_tracer_seuils)
 
+        self.action_tracer_talweg = QAction("Tracé de talweg", self.iface.mainWindow())
+        self.action_tracer_talweg.triggered.connect(self.show_talweg_tool)
+        self.menu.addAction(self.action_tracer_talweg)
 
+        self.action_reset = QAction("Reset", self.iface.mainWindow())
+        self.action_reset.triggered.connect(self.reset_toolbar)
+        self.menu.addAction(self.action_reset)
+
+        # Créer le QToolButton et lui assigner le QMenu
+        self.menu_button = QToolButton()
+        self.menu_button.setText("Configuration MNT")
+        self.menu_button.setMenu(self.menu)
+        self.menu_button.setPopupMode(QToolButton.InstantPopup)  # Afficher le menu au clic
+
+        # Ajouter le QToolButton à la barre d'outils en tant que action
+        self.menu_action = self.toolbar.insertWidget(None, self.menu_button)
+
+        # Garder des références aux actions
+        self.actions = [self.action_mntvisu, self.menu_action]
 
     def unload(self):
         """
@@ -137,6 +150,127 @@ class AssistMnt(QObject):
         for action in self.actions:
             self.toolbar.removeAction(action)
         del self.toolbar
+        if self.profile_dock is not None:
+            self.iface.removeDockWidget(self.profile_dock)
+            self.profile_dock = None
+
+    def clear_toolbar_actions(self):
+        """
+        Supprime toutes les actions de la barre d'outils sauf MNTvisu et le menu.
+        """
+        # Actions à conserver
+        actions_to_keep = [self.action_mntvisu, self.menu_action]
+
+        # Actions à supprimer
+        actions_to_remove = [action for action in self.toolbar.actions() if action not in actions_to_keep]
+
+        for action in actions_to_remove:
+            self.toolbar.removeAction(action)
+            if action in self.actions and action not in actions_to_keep:
+                self.actions.remove(action)
+
+    def combobox_selection_changed(self, index):
+        """
+        Gère la sélection dans le menu déroulant.
+        """
+        action_text = self.toolbar_combobox.currentText()
+
+        if action_text == "Tracé de seuils":
+            self.show_threshold_tools()
+        elif action_text == "Tracé de talweg":
+            self.show_talweg_tool()
+        elif action_text == "Reset":
+            self.reset_toolbar()
+
+        # Réinitialiser la sélection du menu déroulant après action
+        self.toolbar_combobox.setCurrentIndex(0)
+
+    def show_threshold_tools(self):
+        """
+        Affiche les boutons pour le Tracé de seuils.
+        """
+        # Effacer les actions existantes sauf MNTvisu et le menu
+        self.clear_toolbar_actions()
+
+        icon_dir = self.plugin_dir
+
+        # Bouton pour StartMNT
+        self.action_startMNT = QAction(QIcon(os.path.join(icon_dir, "icon_seuil.png")), self.tr(u'StartMNT'),
+                                       self.iface.mainWindow())
+        self.action_startMNT.triggered.connect(self.startmnt_callback)
+        self.toolbar.insertAction(self.menu_action, self.action_startMNT)
+        self.actions.append(self.action_startMNT)
+
+        # Bouton "Simplification" comme QToolButton
+        self.simplify_button = QToolButton()
+        self.simplify_button.setText("Simplification")
+        self.simplify_button.setCheckable(True)
+        self.simplify_button.toggled.connect(self.toggle_simplification)
+        # Insérer le bouton dans la barre d'outils
+        self.simplify_action = self.toolbar.insertWidget(self.menu_action, self.simplify_button)
+        self.actions.append(self.simplify_action)
+
+        # Bouton toggle pour le mode de tracé libre
+        self.action_toggle_free_draw = QAction(QIcon(os.path.join(icon_dir, "icon_toggle.png")),
+                                               self.tr(u'Tracé Libre'), self.iface.mainWindow())
+        self.action_toggle_free_draw.setCheckable(True)
+        self.action_toggle_free_draw.toggled.connect(self.toggle_free_draw)
+        self.toolbar.insertAction(self.menu_action, self.action_toggle_free_draw)
+        self.actions.append(self.action_toggle_free_draw)
+
+        # Bouton pour StopMNT
+        self.action_stopMNT = QAction(QIcon(os.path.join(icon_dir, "icon_stop.png")), self.tr(u'StopMNT'),
+                                      self.iface.mainWindow())
+        self.action_stopMNT.triggered.connect(self.stopmnt_callback)
+        self.toolbar.insertAction(self.menu_action, self.action_stopMNT)
+        self.actions.append(self.action_stopMNT)
+
+    def show_talweg_tool(self):
+        """
+        Affiche le bouton pour le Tracé de talweg.
+        """
+        # Effacer les actions existantes sauf MNTvisu et le menu
+        self.clear_toolbar_actions()
+
+        icon_dir = self.plugin_dir
+
+        # Bouton pour StartTalweg
+        self.action_startTalweg = QAction(QIcon(os.path.join(icon_dir, "icon_talweg.png")), self.tr(u'StartTalweg'),
+                                          self.iface.mainWindow())
+        self.action_startTalweg.triggered.connect(self.starttalweg_callback)
+        self.toolbar.insertAction(self.menu_action, self.action_startTalweg)
+        self.actions.append(self.action_startTalweg)
+
+    def reset_toolbar(self):
+        """
+        Réinitialise la barre d'outils à son état initial.
+        """
+        # Effacer les actions existantes sauf MNTvisu et le menu
+        self.clear_toolbar_actions()
+
+        # Réinitialiser les outils actifs
+        if self.ridge_tool is not None:
+            self.ridge_tool.reset()
+            self.ridge_tool = None
+            self.canvas.unsetMapTool(self.canvas.mapTool())
+
+    def toggle_simplification(self, checked):
+        print("toggle_simplification appelée, checked:", checked)
+        print("self.ridge_tool:", self.ridge_tool)
+        if self.ridge_tool is not None:
+            if checked:
+                tol, ok = QInputDialog.getDouble(self.iface.mainWindow(), "Tolérance de simplification",
+                                                 "Entrez la tolérance :", 5, 0, 100, decimals=2)
+                if ok:
+                    self.ridge_tool.simplification_tolerance = tol
+                else:
+                    # L'utilisateur a annulé, désactiver la simplification
+                    self.simplify_button.setChecked(False)
+                    return
+            self.ridge_tool.set_simplification(checked)
+        else:
+            QMessageBox.warning(None, "Avertissement", "Veuillez d'abord activer l'outil avec le bouton StartMNT.")
+            self.simplify_button.setChecked(False)
 
     def toggle_free_draw(self, checked):
         """Bascule entre le mode assisté et le mode de tracé libre."""
@@ -263,6 +397,13 @@ class AssistMnt(QObject):
             for layer in selected_layers:
                 QgsProject.instance().removeMapLayer(layer.id())
 
+    def starttalweg_callback(self):
+        """
+        Fonction appelée lorsque le bouton StartTalweg est cliqué.
+        Actuellement, elle ne fait rien.
+        """
+        pass
+
     def startmnt_callback(self):
         """Activation de l'outil de tracé."""
         # Vérifier qu'une couche raster est active
@@ -280,61 +421,61 @@ class AssistMnt(QObject):
         self.ridge_tool = RidgeDrawingTool(self.canvas, mnt_layer)
         self.canvas.setMapTool(self.ridge_tool)
 
+        # Vérifier si le dock existe déjà
+        if self.profile_dock is None:
+            self.profile_dock = ProfileDockWidget(self.iface.mainWindow())
+            self.iface.addDockWidget(Qt.RightDockWidgetArea, self.profile_dock)
+
+        # Passer le dock à l'outil de dessin pour qu'il puisse le mettre à jour
+        self.ridge_tool.set_profile_dock(self.profile_dock)
+
     def stopmnt_callback(self):
-        """Désactivation de l'outil et exportation du shapefile."""
-        """Désactivation de l'outil et exportation du shapefile."""
+        """Désactivation de l'outil et création de la couche temporaire."""
         if self.ridge_tool is None:
             QMessageBox.warning(None, "Avertissement", "Aucun tracé en cours.")
             return
-        # **Si en mode tracé libre, quitter ce mode pour enregistrer les points**
+
+        # Si en mode tracé libre, quitter ce mode pour enregistrer les points
         if self.ridge_tool.free_draw_mode:
             self.ridge_tool.set_free_draw_mode(False)
             self.action_toggle_free_draw.setChecked(False)
 
+        # Créer une couche vectorielle temporaire pour les polylignes confirmées
+        crs = self.canvas.mapSettings().destinationCrs()
+        temp_layer = QgsVectorLayer(f"MultiLineString?crs={crs.authid()}", "Ligne de Crête", "memory")
 
-
-        # Exporter la polyligne finale dans un fichier .shp
-        output_path = os.path.join(self.plugin_dir, "ligne_cretes.shp")
-
-        fields = QgsFields()
-        fields.append(QgsField("id", QVariant.Int))
-
-        writer = QgsVectorFileWriter(
-            output_path,
-            "UTF-8",
-            fields,
-            QgsWkbTypes.MultiLineString,
-            self.canvas.mapSettings().destinationCrs(),
-            "ESRI Shapefile"
-        )
-
-        if writer.hasError() != QgsVectorFileWriter.NoError:
-            QMessageBox.critical(None, "Erreur", "Échec de l'écriture du fichier shapefile.")
+        if not temp_layer.isValid():
+            QMessageBox.critical(None, "Erreur", "Impossible de créer la couche vectorielle temporaire.")
             return
 
-        # Créer une géométrie MultiLineString à partir des polylignes confirmées
-        multi_line_geom = QgsGeometry.unaryUnion([geom for geom in self.ridge_tool.confirmed_polylines])
+        # Ajouter les polylignes confirmées à la couche
+        temp_provider = temp_layer.dataProvider()
+        temp_features = []
 
-        feature = QgsFeature()
-        feature.setGeometry(multi_line_geom)
-        feature.setAttributes([1])
-        writer.addFeature(feature)
-        del writer  # Important pour s'assurer que les données sont bien écrites
+        for idx, geom in enumerate(self.ridge_tool.confirmed_polylines):
+            feature = QgsFeature()
+            feature.setGeometry(geom)
+            feature.setAttributes([idx + 1])
+            temp_features.append(feature)
 
-        # Ajouter le shapefile au projet
-        new_layer = QgsVectorLayer(output_path, "Ligne de Crêtes", "ogr")
-        if not new_layer.isValid():
-            QMessageBox.critical(None, "Erreur", "Impossible de charger le shapefile.")
-            return
+        temp_provider.addFeatures(temp_features)
+        temp_layer.updateExtents()
 
-        QgsProject.instance().addMapLayer(new_layer)
+        # Ajouter la couche temporaire au projet
+        QgsProject.instance().addMapLayer(temp_layer)
 
         # Nettoyer et réinitialiser l'outil
         self.ridge_tool.reset()
         self.ridge_tool = None
         self.canvas.unsetMapTool(self.canvas.mapTool())
 
-        QMessageBox.information(None, "Succès", "La polyligne a été exportée avec succès.")
+        # Fermer le dock
+        if self.profile_dock is not None:
+            self.iface.removeDockWidget(self.profile_dock)
+            self.profile_dock = None
+
+        QMessageBox.information(None, "Succès", "La polyligne a été ajoutée en tant que couche temporaire.")
+
 
 class RidgeDrawingTool(QgsMapTool):
     """
@@ -348,8 +489,11 @@ class RidgeDrawingTool(QgsMapTool):
         self.start_point = None
         self.dynamic_path = None
         self.confirmed_polylines = []
-        self.free_draw_mode = False  # **Ajouter cette ligne**
-        self.free_draw_points = []  # **Ajouter cette ligne**
+        self.free_draw_mode = False
+        self.free_draw_points = []
+        self.profile_dock = None
+        self.simplification_enabled = False
+        self.simplification_tolerance = 2
 
         # Rubber band pour la ligne dynamique
         self.dynamic_rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
@@ -367,6 +511,16 @@ class RidgeDrawingTool(QgsMapTool):
         self.free_draw_rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
         self.free_draw_rubber_band.setColor(QColor(0, 255, 0))
         self.free_draw_rubber_band.setWidth(2)
+
+    def set_profile_dock(self, dock):
+        """Assigne le dock du profil d'élévation."""
+        self.profile_dock = dock
+
+    def set_simplification(self, enabled):
+        """
+        Active ou désactive la simplification du tracé.
+        """
+        self.simplification_enabled = enabled
 
     def set_free_draw_mode(self, free_draw):
         """Bascule le mode de tracé libre."""
@@ -423,7 +577,8 @@ class RidgeDrawingTool(QgsMapTool):
                     self.start_point = self.dynamic_path.asPolyline()[-1]
                 # Réinitialiser la ligne dynamique
                 self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
-#
+
+    #
     def canvasMoveEvent(self, event):
         """Gestion des mouvements de souris."""
         if self.free_draw_mode:
@@ -441,20 +596,147 @@ class RidgeDrawingTool(QgsMapTool):
                 # Calculer le chemin de plus haute altitude
                 path_geometry = self.calculate_highest_path(self.start_point, current_point)
                 if path_geometry:
-                    self.dynamic_path = path_geometry
+                    # **Appliquer la simplification si activée**
+                    if self.simplification_enabled:
+                        simplified_geometry = self.simplify_geometry(path_geometry)
+                        self.dynamic_path = simplified_geometry
+                    else:
+                        self.dynamic_path = path_geometry
+                    # Afficher la polyligne dynamique
                     self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
-                    self.dynamic_rubber_band.addGeometry(path_geometry, None)
+                    self.dynamic_rubber_band.addGeometry(self.dynamic_path, None)
+
+                    # Mettre à jour le profil d'élévation
+                    if self.profile_dock:
+                        self.update_elevation_profile(self.dynamic_path)
                 else:
                     self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
 
+    def simplify_geometry(self, geometry):
+        """
+        Simplifie la géométrie tout en préservant les points d'altitude maximale.
+        """
+        # Extraire les points de la polyligne
+        points = geometry.asPolyline()
+
+        # Trouver le point avec l'altitude maximale
+        max_elevation = -float('inf')
+        max_point = None
+        for point in points:
+            elevation = self.get_elevation_at_point(point)
+            if elevation is not None and elevation > max_elevation:
+                max_elevation = elevation
+                max_point = point
+
+        # Simplifier la géométrie
+        simplified_geometry = geometry.simplify(self.simplification_tolerance)
+
+        # S'assurer que le point d'altitude maximale est inclus
+        if max_point and not simplified_geometry.contains(QgsGeometry.fromPointXY(max_point)):
+            # Ajouter le point d'altitude maximale à la géométrie simplifiée
+            simplified_points = simplified_geometry.asPolyline()
+            simplified_points.append(max_point)
+            simplified_geometry = QgsGeometry.fromPolylineXY(simplified_points)
+            simplified_geometry = simplified_geometry.simplify(self.simplification_tolerance)
+
+        return simplified_geometry
+
+    def toggle_simplification(self, checked):
+        """
+        Active ou désactive la simplification du tracé.
+        """
+        if self.ridge_tool is not None:
+            if checked:
+                # Demander à l'utilisateur de saisir la tolérance
+                tol, ok = QInputDialog.getDouble(None, "Tolérance de simplification", "Entrez la tolérance :", 5, 0,
+                                                 100, decimals=2)
+                if ok:
+                    self.ridge_tool.simplification_tolerance = tol
+                else:
+                    # L'utilisateur a annulé, désactiver la simplification
+                    self.action_simplify.setChecked(False)
+                    return
+            self.ridge_tool.set_simplification(checked)
+        else:
+            QMessageBox.warning(None, "Avertissement", "Veuillez d'abord activer l'outil avec le bouton StartMNT.")
+            self.action_simplify.setChecked(False)
+
+
+    def update_elevation_profile(self, geometry):
+        """Extrait les altitudes le long de la polyligne et met à jour le profil."""
+        points = geometry.asPolyline()
+        distances = []
+        elevations = []
+        total_distance = 0
+
+        prev_point = None
+        for point in points:
+            # Calculer la distance cumulative
+            if prev_point is not None:
+                segment = QgsGeometry.fromPolylineXY([prev_point, point])
+                distance = segment.length()
+                total_distance += distance
+            else:
+                total_distance = 0
+            distances.append(total_distance)
+            prev_point = point
+
+            # Obtenir l'élévation du raster au point
+            elevation = self.get_elevation_at_point(point)
+            elevations.append(elevation if elevation is not None else 0)
+
+        # Mettre à jour le profil dans le dock
+        self.profile_dock.update_profile(distances, elevations)
+
+    def get_elevation_at_point(self, point):
+        """Obtient l'élévation du raster au point donné."""
+        # Transformer le point si nécessaire
+        raster_crs = self.raster_layer.crs()
+        canvas_crs = self.canvas.mapSettings().destinationCrs()
+        if raster_crs != canvas_crs:
+            xform = QgsCoordinateTransform(canvas_crs, raster_crs, QgsProject.instance())
+            point = xform.transform(point)
+
+        # Obtenir la valeur du raster
+        ident = self.raster_layer.dataProvider().identify(point, QgsRaster.IdentifyFormatValue)
+
+        # Vérifier si l'identification est valide
+        if ident.isValid():
+            results = ident.results()
+            # Afficher les résultats pour débogage
+            print(f"Résultats de l'identification au point {point}: {results}")
+            print(f"Clés disponibles : {results.keys()}")
+
+            # Déterminer la clé correcte pour accéder à l'altitude
+            elevation = None
+            if 'Band 1' in results:
+                elevation = results.get('Band 1', None)
+            elif 'Bande 1' in results:
+                elevation = results.get('Bande 1', None)
+            elif 'value' in results:
+                elevation = results.get('value', None)
+            elif 1 in results:
+                elevation = results.get(1, None)
+            else:
+                print("Clé d'altitude non trouvée dans les résultats.")
+                elevation = None
+
+            if elevation is not None:
+                elevation = float(elevation)
+            else:
+                print(f"Aucune élévation trouvée au point {point}.")
+            return elevation
+        else:
+            print(f"Identification non valide au point {point}.")
+            return None
+
     def calculate_highest_path(self, start_point, end_point):
         """Calcul du chemin de plus haute altitude entre deux points dans le buffer."""
-        import sys
         from osgeo import gdal
 
         # Création du buffer autour de la ligne entre les deux points
         line = QgsGeometry.fromPolylineXY([start_point, end_point])
-        buffer_distance = 15  # 10 mètres de chaque côté
+        buffer_distance = 20
         buffer_geom = line.buffer(buffer_distance, -1)
 
         # Définir l'étendue du raster à extraire
@@ -589,3 +871,29 @@ class RidgeDrawingTool(QgsMapTool):
         self.free_draw_rubber_band.reset(QgsWkbTypes.LineGeometry)
         self.free_draw_points = []
         self.free_draw_mode = False
+
+
+
+class ProfileDockWidget(QDockWidget):
+    def __init__(self, parent=None):
+        super().__init__("Profil d'Élévation", parent)
+
+        # Créer une figure Matplotlib
+        self.figure, self.ax = plt.subplots()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+
+        # Configurer le widget principal
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.addWidget(self.canvas)
+        widget.setLayout(layout)
+        self.setWidget(widget)
+
+    def update_profile(self, distances, elevations):
+        """Met à jour le graphique du profil d'élévation."""
+        self.ax.clear()
+        self.ax.plot(distances, elevations)
+        self.ax.set_xlabel("Distance (m)")
+        self.ax.set_ylabel("Élévation (m)")
+        self.ax.set_title("Profil d'Élévation")
+        self.canvas.draw()
