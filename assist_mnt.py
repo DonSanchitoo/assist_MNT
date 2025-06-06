@@ -423,7 +423,7 @@ class RidgeDrawingTool(QgsMapTool):
                     self.start_point = self.dynamic_path.asPolyline()[-1]
                 # Réinitialiser la ligne dynamique
                 self.dynamic_rubber_band.reset(QgsWkbTypes.LineGeometry)
-
+#
     def canvasMoveEvent(self, event):
         """Gestion des mouvements de souris."""
         if self.free_draw_mode:
