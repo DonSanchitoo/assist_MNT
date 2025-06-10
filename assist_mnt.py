@@ -8,8 +8,9 @@ import matplotlib
 import networkx as nx
 import numpy as np
 import processing
+
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QObject, QVariant
-from qgis.PyQt.QtGui import QIcon, QColor
+from qgis.PyQt.QtGui import QIcon, QColor, QPainter
 from qgis.PyQt.QtWidgets import QAction, QMenu, QToolButton
 from qgis.PyQt.QtWidgets import QAction, QMessageBox
 from qgis.PyQt.QtWidgets import QAction, QMessageBox, QComboBox, QWidget, QToolBar
@@ -109,7 +110,7 @@ class AssistMnt(QObject):
         self.toolbar.setObjectName('Assist MNT')
 
         # Créer le bouton MNTvisu et l'ajouter à la barre d'outils
-        self.action_mntvisu = QAction(QIcon(os.path.join(icon_dir, "icon_2dm.png")), self.tr(u'MNTvisu'),
+        self.action_mntvisu = QAction(QIcon(os.path.join(icon_dir, "icon/icon_2dm.png")), self.tr(u'MNTvisu'),
                                       self.iface.mainWindow())
         self.action_mntvisu.triggered.connect(self.mntvisu_callback)
         self.toolbar.addAction(self.action_mntvisu)
@@ -195,11 +196,12 @@ class AssistMnt(QObject):
         icon_dir = self.plugin_dir
 
         # Bouton pour StartMNT
-        self.action_startMNT = QAction(QIcon(os.path.join(icon_dir, "icon_seuil.png")), self.tr(u'StartMNT'),
+        self.action_startMNT = QAction(QIcon(os.path.join(icon_dir, "icon/icon_seuil.png")), self.tr(u'StartMNT'),
                                        self.iface.mainWindow())
         self.action_startMNT.triggered.connect(self.startmnt_callback)
         self.toolbar.insertAction(self.menu_action, self.action_startMNT)
         self.actions.append(self.action_startMNT)
+
 
         # Bouton "Simplification" comme QToolButton
         self.simplify_button = QToolButton()
@@ -211,7 +213,7 @@ class AssistMnt(QObject):
         self.actions.append(self.simplify_action)
 
         # Bouton toggle pour le mode de tracé libre
-        self.action_toggle_free_draw = QAction(QIcon(os.path.join(icon_dir, "icon_toggle.png")),
+        self.action_toggle_free_draw = QAction(QIcon(os.path.join(icon_dir, "icon/icon_toggle.png")),
                                                self.tr(u'Tracé Libre'), self.iface.mainWindow())
         self.action_toggle_free_draw.setCheckable(True)
         self.action_toggle_free_draw.toggled.connect(self.toggle_free_draw)
@@ -219,7 +221,7 @@ class AssistMnt(QObject):
         self.actions.append(self.action_toggle_free_draw)
 
         # Bouton pour StopMNT
-        self.action_stopMNT = QAction(QIcon(os.path.join(icon_dir, "icon_stop.png")), self.tr(u'StopMNT'),
+        self.action_stopMNT = QAction(QIcon(os.path.join(icon_dir, "icon/icon_stop.png")), self.tr(u'StopMNT'),
                                       self.iface.mainWindow())
         self.action_stopMNT.triggered.connect(self.stopmnt_callback)
         self.toolbar.insertAction(self.menu_action, self.action_stopMNT)
@@ -235,7 +237,7 @@ class AssistMnt(QObject):
         icon_dir = self.plugin_dir
 
         # Bouton pour StartTalweg
-        self.action_startTalweg = QAction(QIcon(os.path.join(icon_dir, "icon_talweg.png")), self.tr(u'StartTalweg'),
+        self.action_startTalweg = QAction(QIcon(os.path.join(icon_dir, "icon/icon_talweg.png")), self.tr(u'StartTalweg'),
                                           self.iface.mainWindow())
         self.action_startTalweg.triggered.connect(self.starttalweg_callback)
         self.toolbar.insertAction(self.menu_action, self.action_startTalweg)
@@ -497,20 +499,20 @@ class RidgeDrawingTool(QgsMapTool):
 
         # Rubber band pour la ligne dynamique
         self.dynamic_rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
-        self.dynamic_rubber_band.setColor(QColor(255, 0, 0))
-        self.dynamic_rubber_band.setWidth(2)
+        self.dynamic_rubber_band.setColor(QColor(0, 255, 0))
+        self.dynamic_rubber_band.setWidth(3)
         self.dynamic_rubber_band.setLineStyle(Qt.DashLine)
 
         # Rubber band pour les polylignes confirmées
         self.confirmed_rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
-        self.confirmed_rubber_band.setColor(QColor(0, 0, 255))
-        self.confirmed_rubber_band.setWidth(2)
+        self.confirmed_rubber_band.setColor(QColor(0, 0, 220))
+        self.confirmed_rubber_band.setWidth(3)
 
         # **Ajouter ce code pour le tracé libre**
         # Rubber band pour le tracé libre
         self.free_draw_rubber_band = QgsRubberBand(self.canvas, QgsWkbTypes.LineGeometry)
-        self.free_draw_rubber_band.setColor(QColor(0, 255, 0))
-        self.free_draw_rubber_band.setWidth(2)
+        self.free_draw_rubber_band.setColor(QColor(0, 255, 255))
+        self.free_draw_rubber_band.setWidth(3)
 
     def set_profile_dock(self, dock):
         """Assigne le dock du profil d'élévation."""
